@@ -14,13 +14,13 @@ if (!(Promise as any).withResolvers) {
 
 import * as pdfjsLib from 'pdfjs-dist';
 // @ts-ignore
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
+import PdfWorker from './pdf.worker.ts?worker';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { Upload, FileText, Download, Trash2, Settings2, Image as ImageIcon, Plus, CheckCircle2, AlertCircle, Loader2, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+pdfjsLib.GlobalWorkerOptions.workerPort = new PdfWorker();
 
 const formatFileSize = (bytes: number) => {
   if (bytes === 0) return '0 Bytes';
@@ -144,7 +144,7 @@ export default function App() {
   }, [jobs, scale]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
+    const files = Array.from(e.target.files || []) as File[];
     if (files.length === 0) return;
 
     const validFiles = files.filter(f => f.type === 'application/pdf');
@@ -399,7 +399,7 @@ export default function App() {
                                   失败
                                 </span>
                                 {job.errorDetails && (
-                                  <span className="text-xs text-red-500 mt-1.5 text-right break-words whitespace-normal w-full leading-relaxed">
+                                  <span className="text-xs text-red-500 mt-1.5 text-right break-all whitespace-normal w-full leading-relaxed">
                                     {job.errorDetails}
                                   </span>
                                 )}
