@@ -1,4 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
+
+// Polyfill for Promise.withResolvers for older browsers (e.g., older iOS Safari)
+if (!(Promise as any).withResolvers) {
+  (Promise as any).withResolvers = function () {
+    let resolve: any, reject: any;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+}
+
 import * as pdfjsLib from 'pdfjs-dist';
 // @ts-ignore
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
@@ -380,13 +393,13 @@ export default function App() {
                               </span>
                             )}
                             {job.status === 'error' && (
-                              <div className="flex flex-col items-end">
+                              <div className="flex flex-col items-end max-w-[200px] sm:max-w-[300px]">
                                 <span className="text-red-600 text-sm font-medium flex items-center bg-red-50 px-3 py-1 rounded-lg" title={job.error}>
                                   <AlertCircle className="w-4 h-4 mr-1.5" />
                                   失败
                                 </span>
                                 {job.errorDetails && (
-                                  <span className="text-xs text-red-500 mt-1 max-w-[200px] sm:max-w-[300px] truncate" title={job.errorDetails}>
+                                  <span className="text-xs text-red-500 mt-1.5 text-right break-words whitespace-normal w-full leading-relaxed">
                                     {job.errorDetails}
                                   </span>
                                 )}
