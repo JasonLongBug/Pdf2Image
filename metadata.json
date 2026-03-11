@@ -1,0 +1,5 @@
+{
+  "name": "PDF转图片",
+  "description": "一个前端实现的将PDF转换为图片的工具，支持多页转换和打包下载。",
+  "requestFramePermissions": []
+}
