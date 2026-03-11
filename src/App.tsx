@@ -17,13 +17,19 @@ const formatFileSize = (bytes: number) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
+type PdfImage = {
+  url: string;
+  blob: Blob;
+};
+
 type PdfJob = {
   id: string;
   file: File;
   status: 'pending' | 'processing' | 'completed' | 'error';
   progress: number;
-  images: string[];
+  images: PdfImage[];
   error?: string;
+  errorDetails?: string;
 };
 
 export default function App() {
@@ -43,7 +49,7 @@ export default function App() {
       isProcessingRef.current = true;
       
       setJobs(prev => prev.map(j => 
-        j.id === nextJob.id ? { ...j, status: 'processing', progress: 0 } : j
+        j.id === nextJob.id ? { ...j, status: 'processing', progress: 0, error: undefined, errorDetails: undefined } : j
       ));
 
       try {
@@ -56,7 +62,7 @@ export default function App() {
         }).promise;
         
         const totalPages = pdf.numPages;
-        const newImages: string[] = [];
+        const newImages: PdfImage[] = [];
 
         for (let i = 1; i <= totalPages; i++) {
           const page = await pdf.getPage(i);
@@ -64,7 +70,13 @@ export default function App() {
 
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d');
-          if (!context) continue;
+          if (!context) throw new Error('无法创建 Canvas 2D 上下文');
+
+          // 检查移动端 Canvas 尺寸限制 (iOS Safari 限制面积约 16777216)
+          const MAX_CANVAS_AREA = 16777216;
+          if (viewport.width * viewport.height > MAX_CANVAS_AREA) {
+             throw new Error(`页面尺寸过大 (${Math.round(viewport.width)}x${Math.round(viewport.height)})，超出了浏览器内存限制。请尝试降低清晰度倍数。`);
+          }
 
           canvas.height = viewport.height;
           canvas.width = viewport.width;
@@ -75,9 +87,25 @@ export default function App() {
             viewport: viewport,
           };
 
-          await page.render(renderContext).promise;
-          const imageUrl = canvas.toDataURL('image/jpeg', 0.9);
-          newImages.push(imageUrl);
+          try {
+            await page.render(renderContext).promise;
+          } catch (renderErr: any) {
+             throw new Error(`渲染第 ${i} 页失败: ${renderErr.message || '未知渲染错误'}`);
+          }
+          
+          // 使用 toBlob 替代 toDataURL，大幅降低内存占用，防止手机端 OOM 崩溃
+          const blob = await new Promise<Blob | null>((resolve) => {
+            canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.9);
+          });
+
+          if (!blob) throw new Error(`第 ${i} 页生成图片失败`);
+
+          const imageUrl = URL.createObjectURL(blob);
+          newImages.push({ url: imageUrl, blob });
+
+          // 释放 Canvas 内存
+          canvas.width = 0;
+          canvas.height = 0;
 
           setJobs(prev => prev.map(j => 
             j.id === nextJob.id ? { ...j, progress: Math.round((i / totalPages) * 100) } : j
@@ -87,10 +115,11 @@ export default function App() {
         setJobs(prev => prev.map(j => 
           j.id === nextJob.id ? { ...j, status: 'completed', images: newImages, progress: 100 } : j
         ));
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error processing PDF:', error);
+        const errorMsg = error?.message || error?.toString() || '未知错误';
         setJobs(prev => prev.map(j => 
-          j.id === nextJob.id ? { ...j, status: 'error', error: '转换失败，文件可能损坏或加密' } : j
+          j.id === nextJob.id ? { ...j, status: 'error', error: '转换失败', errorDetails: errorMsg } : j
         ));
       } finally {
         isProcessingRef.current = false;
@@ -128,12 +157,18 @@ export default function App() {
   const handleScaleChange = (newScale: number) => {
     setScale(newScale);
     // Re-queue all jobs to process again with new scale
-    setJobs(prev => prev.map(job => ({
-      ...job,
-      status: 'pending',
-      progress: 0,
-      images: []
-    })));
+    setJobs(prev => prev.map(job => {
+      // 清理旧的 Blob URL 释放内存
+      job.images.forEach(img => URL.revokeObjectURL(img.url));
+      return {
+        ...job,
+        status: 'pending',
+        progress: 0,
+        images: [],
+        error: undefined,
+        errorDetails: undefined
+      };
+    }));
   };
 
   const handleDownloadJob = async (jobId: string) => {
@@ -145,8 +180,7 @@ export default function App() {
     const imgFolder = zip.folder(folderName);
 
     job.images.forEach((img, index) => {
-      const base64Data = img.split(',')[1];
-      imgFolder?.file(`page_${index + 1}.jpg`, base64Data, { base64: true });
+      imgFolder?.file(`page_${index + 1}.jpg`, img.blob);
     });
 
     const content = await zip.generateAsync({ type: 'blob' });
@@ -167,8 +201,7 @@ export default function App() {
       const folderName = job.file.name.replace('.pdf', '');
       const imgFolder = zip.folder(folderName);
       job.images.forEach((img, index) => {
-        const base64Data = img.split(',')[1];
-        imgFolder?.file(`page_${index + 1}.jpg`, base64Data, { base64: true });
+        imgFolder?.file(`page_${index + 1}.jpg`, img.blob);
       });
     });
 
@@ -176,16 +209,25 @@ export default function App() {
     saveAs(content, `批量导出的PDF图片.zip`);
   };
 
-  const handleDownloadSingle = (imgUrl: string, index: number, jobName: string) => {
+  const handleDownloadSingle = (img: PdfImage, index: number, jobName: string) => {
     const prefix = jobName.replace('.pdf', '');
-    saveAs(imgUrl, `${prefix}_page_${index + 1}.jpg`);
+    saveAs(img.blob, `${prefix}_page_${index + 1}.jpg`);
   };
 
   const handleRemoveJob = (jobId: string) => {
-    setJobs(prev => prev.filter(j => j.id !== jobId));
+    setJobs(prev => {
+      const jobToRemove = prev.find(j => j.id === jobId);
+      if (jobToRemove) {
+        jobToRemove.images.forEach(img => URL.revokeObjectURL(img.url));
+      }
+      return prev.filter(j => j.id !== jobId);
+    });
   };
 
   const handleClearAll = () => {
+    jobs.forEach(job => {
+      job.images.forEach(img => URL.revokeObjectURL(img.url));
+    });
     setJobs([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -338,10 +380,17 @@ export default function App() {
                               </span>
                             )}
                             {job.status === 'error' && (
-                              <span className="text-red-600 text-sm font-medium flex items-center bg-red-50 px-3 py-1 rounded-lg" title={job.error}>
-                                <AlertCircle className="w-4 h-4 mr-1.5" />
-                                失败
-                              </span>
+                              <div className="flex flex-col items-end">
+                                <span className="text-red-600 text-sm font-medium flex items-center bg-red-50 px-3 py-1 rounded-lg" title={job.error}>
+                                  <AlertCircle className="w-4 h-4 mr-1.5" />
+                                  失败
+                                </span>
+                                {job.errorDetails && (
+                                  <span className="text-xs text-red-500 mt-1 max-w-[200px] sm:max-w-[300px] truncate" title={job.errorDetails}>
+                                    {job.errorDetails}
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
                           
@@ -377,7 +426,7 @@ export default function App() {
                                 key={index}
                                 className="group relative bg-slate-100/50 rounded-xl overflow-hidden border border-slate-200 aspect-[3/4] shadow-sm hover:shadow-md transition-all duration-300"
                               >
-                                <img src={img} alt={`Page ${index + 1}`} className="w-full h-full object-contain p-1.5" />
+                                <img src={img.url} alt={`Page ${index + 1}`} className="w-full h-full object-contain p-1.5" />
                                 
                                 <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center backdrop-blur-[2px]">
                                   <button
