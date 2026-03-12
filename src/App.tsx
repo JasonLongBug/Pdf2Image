@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 
 import * as pdfjsLib from 'pdfjs-dist';
+// @ts-ignore
+import workerSrc from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { Upload, FileText, Download, Trash2, Settings2, Image as ImageIcon, Plus, CheckCircle2, AlertCircle, Loader2, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
 
 const formatFileSize = (bytes: number) => {
   if (bytes === 0) return '0 Bytes';
@@ -45,6 +47,7 @@ export default function App() {
       const nextJob = jobs.find(j => j.status === 'pending');
       if (!nextJob) return;
 
+      console.log(`[Job ${nextJob.id}] Starting processing...`);
       isProcessingRef.current = true;
       
       setJobs(prev => prev.map(j => 
@@ -52,20 +55,33 @@ export default function App() {
       ));
 
       try {
+        console.log(`[Job ${nextJob.id}] Getting array buffer...`);
         const arrayBuffer = await nextJob.file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({
+        console.log(`[Job ${nextJob.id}] Array buffer loaded, size: ${arrayBuffer.byteLength}`);
+        
+        console.log(`[Job ${nextJob.id}] Calling getDocument...`);
+        const loadingTask = pdfjsLib.getDocument({
           data: arrayBuffer,
           cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
           cMapPacked: true,
           standardFontDataUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/standard_fonts/'
-        }).promise;
+        });
+        
+        loadingTask.onProgress = (progressData) => {
+          console.log(`[Job ${nextJob.id}] Loading progress: ${progressData.loaded}/${progressData.total}`);
+        };
+
+        const pdf = await loadingTask.promise;
+        console.log(`[Job ${nextJob.id}] Document loaded, pages: ${pdf.numPages}`);
         
         const totalPages = pdf.numPages;
         const newImages: PdfImage[] = [];
 
         for (let i = 1; i <= totalPages; i++) {
+          console.log(`[Job ${nextJob.id}] Getting page ${i}...`);
           const page = await pdf.getPage(i);
           const viewport = page.getViewport({ scale });
+          console.log(`[Job ${nextJob.id}] Page ${i} loaded, viewport: ${viewport.width}x${viewport.height}`);
 
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d');
