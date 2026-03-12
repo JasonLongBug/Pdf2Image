@@ -1,50 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-// Polyfill for Promise.withResolvers for older browsers (e.g., older iOS Safari)
-if (!(Promise as any).withResolvers) {
-  (Promise as any).withResolvers = function () {
-    let resolve: any, reject: any;
-    const promise = new Promise((res, rej) => {
-      resolve = res;
-      reject = rej;
-    });
-    return { promise, resolve, reject };
-  };
-}
-
-// Polyfill for Map.prototype.getOrInsertComputed (used by pdf.js)
-if (!(Map.prototype as any).getOrInsertComputed) {
-  (Map.prototype as any).getOrInsertComputed = function (key: any, callback: (key: any) => any) {
-    if (this.has(key)) {
-      return this.get(key);
-    }
-    const value = callback(key);
-    this.set(key, value);
-    return value;
-  };
-}
-
-// Polyfill for WeakMap.prototype.getOrInsertComputed (used by pdf.js)
-if (!(WeakMap.prototype as any).getOrInsertComputed) {
-  (WeakMap.prototype as any).getOrInsertComputed = function (key: any, callback: (key: any) => any) {
-    if (this.has(key)) {
-      return this.get(key);
-    }
-    const value = callback(key);
-    this.set(key, value);
-    return value;
-  };
-}
-
 import * as pdfjsLib from 'pdfjs-dist';
-// @ts-ignore
-import PdfWorker from './pdf.worker.ts?worker';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { Upload, FileText, Download, Trash2, Settings2, Image as ImageIcon, Plus, CheckCircle2, AlertCircle, Loader2, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-pdfjsLib.GlobalWorkerOptions.workerPort = new PdfWorker();
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
 const formatFileSize = (bytes: number) => {
   if (bytes === 0) return '0 Bytes';
@@ -93,9 +55,9 @@ export default function App() {
         const arrayBuffer = await nextJob.file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({
           data: arrayBuffer,
-          cMapUrl: 'https://unpkg.com/pdfjs-dist@5.5.207/cmaps/',
+          cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
           cMapPacked: true,
-          standardFontDataUrl: 'https://unpkg.com/pdfjs-dist@5.5.207/standard_fonts/',
+          standardFontDataUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/standard_fonts/'
         }).promise;
         
         const totalPages = pdf.numPages;
